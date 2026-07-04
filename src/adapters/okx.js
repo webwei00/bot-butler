@@ -39,6 +39,33 @@ const REQUIRED_ENV =
   '~/.okx/config.toml via `okx config init` (Read + Trade permissions only, never Withdraw; start on demo trading). ' +
   'Market-data commands are public and need no auth.';
 
+// OKX public market data — no credentials needed. Used by real mode for the
+// read-only strategist path (listInstruments / fetchCandles / fetchTicker).
+const OKX_BASE = process.env.OKX_API_BASE_URL || 'https://www.okx.com';
+const OKX_HTTP_TIMEOUT_MS = Number(process.env.OKX_HTTP_TIMEOUT_MS || 6000);
+// Curated liquid majors (so we fetch a handful of candle series, not hundreds).
+const REAL_MAJORS = [
+  'BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'XRP-USDT',
+  'DOGE-USDT', 'ADA-USDT', 'AVAX-USDT', 'LINK-USDT', 'TON-USDT',
+];
+
+async function okxGet(path) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), OKX_HTTP_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${OKX_BASE}${path}`, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': 'bot-butler' },
+    });
+    if (!res.ok) throw new Error(`OKX HTTP ${res.status} for ${path}`);
+    const json = await res.json();
+    if (String(json.code) !== '0') throw new Error(`OKX API error ${json.code}: ${json.msg}`);
+    return json.data;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 function realNotWired(what, cliExample, note = '') {
   const err = new Error(
     `[OKX real mode] '${what}' is not wired yet — no API keys exist.\n` +
@@ -79,24 +106,31 @@ export function createOkxAdapter({ state, mode = okxMode() } = {}) {
       if (mock) {
         return market.PAIR_META.map(({ instId, major }) => ({ instId, major }));
       }
-      realNotWired(
-        'listInstruments',
-        'okx market tickers SPOT --json   # public market-data (no auth); filter by instId/volume. Tick/lot sizes: okx market instruments --instType SPOT --json'
-      );
+      // Real: curated liquid majors (public data — no auth). Alts are marked
+      // non-major so the majors-only rail behaves like the sim.
+      return REAL_MAJORS.map((instId) => ({ instId, major: true }));
     },
 
     /** Hourly candles, oldest first: [{ ts, o, h, l, c, v }] */
     async fetchCandles(instId, { limit = 96 } = {}) {
       if (mock) return market.getCandles(mustMarket(), instId, limit);
-      realNotWired(
-        'fetchCandles',
-        `okx market candles ${instId} --bar 1H --limit ${limit} --json   # public (no auth); bar is '1H' not '1h'; returns NEWEST FIRST — reverse to oldest-first. 70+ indicators also available via 'okx market indicator'`
+      // Real: public candles (no auth). bar is '1H'; OKX returns NEWEST first,
+      // so reverse to oldest-first to match the sim's contract.
+      const rows = await okxGet(
+        `/api/v5/market/candles?instId=${encodeURIComponent(instId)}&bar=1H&limit=${limit}`
       );
+      return rows
+        .map((r) => ({
+          ts: Number(r[0]), o: Number(r[1]), h: Number(r[2]),
+          l: Number(r[3]), c: Number(r[4]), v: Number(r[5]),
+        }))
+        .reverse();
     },
 
     async fetchTicker(instId) {
       if (mock) return { instId, last: market.getPrice(mustMarket(), instId), ts: nowIso() };
-      realNotWired('fetchTicker', `okx market ticker ${instId} --json   # public (no auth)`);
+      const d = await okxGet(`/api/v5/market/ticker?instId=${encodeURIComponent(instId)}`);
+      return { instId, last: Number(d[0].last), ts: nowIso() };
     },
 
     // ------------------------------------------------------------------ bots

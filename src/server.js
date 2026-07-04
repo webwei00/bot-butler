@@ -44,6 +44,12 @@ import {
 } from './x402/gate.js';
 import { c, hr, round2 } from './util.js';
 
+// The hosted service defaults to real OKX public market data (the strategist's
+// candles/tickers are public — no keys). Bot LAUNCH still needs the owner's
+// trade key and stays stubbed. CLI/tests/demo import the engine directly (not
+// this file) so they keep the default mock simulation. Override with OKX_MODE.
+process.env.OKX_MODE ||= 'real';
+
 const PORT = Number.parseInt(process.env.PORT ?? '', 10) || 4102;
 const HTML_PATH = path.join(ROOT, 'web', 'index.html');
 const RISK_ALIASES = { low: 'low', med: 'medium', medium: 'medium', high: 'high' };

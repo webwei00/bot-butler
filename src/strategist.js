@@ -69,9 +69,18 @@ export async function analyzeUniverse(okx, { majorsOnly = true } = {}) {
   const candidates = instruments.filter((i) => (majorsOnly ? i.major : true));
   const analyzed = [];
   for (const inst of candidates) {
-    const candles = await okx.fetchCandles(inst.instId, { limit: 96 });
-    const m = detectRegime(candles);
-    analyzed.push({ instId: inst.instId, major: inst.major, ...m, fitScore: gridFitScore(m) });
+    try {
+      const candles = await okx.fetchCandles(inst.instId, { limit: 96 });
+      const m = detectRegime(candles);
+      analyzed.push({ instId: inst.instId, major: inst.major, ...m, fitScore: gridFitScore(m) });
+    } catch {
+      // Skip a pair whose data is momentarily unavailable (real mode: one flaky
+      // OKX call) rather than failing the whole proposal.
+      continue;
+    }
+  }
+  if (analyzed.length === 0) {
+    throw new Error('No market data available for any candidate pair — try again shortly.');
   }
   analyzed.sort((a, b) => b.fitScore - a.fitScore);
   return analyzed;
