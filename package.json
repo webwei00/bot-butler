@@ -1,0 +1,28 @@
+{
+  "name": "bot-butler",
+  "version": "0.1.0",
+  "description": "Grid/DCA bot strategist with an ongoing stewardship loop. Mock-first OKX build: propose, launch with safety rails, steward (pause/resume/resize), daily digest. CLI + zero-dependency web dashboard & service API.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "cli": "node src/index.js",
+    "demo": "node src/index.js demo",
+    "serve": "node src/server.js",
+    "x402-demo": "node scripts/x402-demo.js",
+    "tick": "node src/index.js tick",
+    "digest": "node src/index.js digest",
+    "test": "node --test"
+  },
+  "keywords": [
+    "okx",
+    "grid-bot",
+    "dca",
+    "trading-agent",
+    "steward"
+  ],
+  "license": "MIT"
+}

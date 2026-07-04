@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bot Butler — grid &amp; DCA stewardship</title>
+<meta name="description" content="A grid/DCA strategist that manages, not just creates. Set, but never forget.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f131c'/%3E%3Ccircle cx='32' cy='12' r='3.4' fill='%23c9a96e'/%3E%3Cline x1='32' y1='15' x2='32' y2='19' stroke='%23c9a96e' stroke-width='3'/%3E%3Cpath d='M14 37a18 18 0 0 1 36 0' fill='none' stroke='%23c9a96e' stroke-width='4' stroke-linecap='round'/%3E%3Cline x1='10' y1='37' x2='54' y2='37' stroke='%23c9a96e' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M32 49l-11-5.6v11.2zM32 49l11-5.6v11.2z' fill='%23c9a96e'/%3E%3Ccircle cx='32' cy='49' r='2.6' fill='%230f131c' stroke='%23c9a96e' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0f131c; --bg2:#121828;
+    --panel:#151b29; --panel2:#182032; --well:#0d1119;
+    --line:#232c40; --line-soft:#1c2436;
+    --gold:#c9a96e; --gold-bright:#e8d3a4; --gold-dim:#8f7a4e;
+    --gold-line:rgba(201,169,110,.30); --gold-wash:rgba(201,169,110,.06);
+    --ivory:#ece7da; --text:#c3c9d6; --muted:#8b93a7; --faint:#5f6779;
+    --green:#8fc9a0; --green-wash:rgba(143,201,160,.10);
+    --amber:#e0b45c; --amber-wash:rgba(224,180,92,.10);
+    --red:#d98a76; --red-wash:rgba(217,138,118,.08);
+    --serif:Georgia,'Iowan Old Style','Palatino Linotype','Book Antiqua','Times New Roman',serif;
+    --sans:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'Cascadia Code',Consolas,'Courier New',monospace;
+    --radius:12px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1100px 460px at 50% -180px, rgba(201,169,110,.07), transparent 60%),
+      repeating-linear-gradient(135deg, transparent 0 13px, rgba(255,255,255,.011) 13px 14px),
+      linear-gradient(180deg, var(--bg2), var(--bg) 320px);
+    color:var(--text);
+    font:14px/1.55 var(--sans);
+    min-height:100vh;
+  }
+  ::selection{background:rgba(201,169,110,.32)}
+
+  /* ---------- header ---------- */
+  header{
+    position:sticky; top:0; z-index:20;
+    display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+    padding:14px 28px;
+    background:rgba(15,19,28,.88); backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line-soft);
+  }
+  header::after{
+    content:''; position:absolute; left:0; right:0; bottom:-1px; height:1px;
+    background:linear-gradient(90deg, transparent, var(--gold-line) 30%, var(--gold-line) 70%, transparent);
+  }
+  .brand{display:flex; align-items:center; gap:13px; min-width:0}
+  .brand svg{flex:none}
+  .brand-name{font:500 22px/1.1 var(--serif); color:var(--ivory); letter-spacing:.02em}
+  .brand-name b{color:var(--gold-bright); font-weight:500}
+  .brand-tag{font:italic 12px/1.3 var(--serif); color:var(--muted); margin-top:2px}
+  .head-right{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .badge{
+    display:inline-flex; align-items:center; gap:7px;
+    font:600 10.5px var(--sans); letter-spacing:.17em; text-transform:uppercase;
+    border:1px solid var(--line); border-radius:999px; padding:5px 12px; color:var(--muted);
+    white-space:nowrap;
+  }
+  .badge.sim{border-color:var(--gold-line); color:var(--gold-bright); background:var(--gold-wash)}
+  .badge.sim .pulse{width:7px;height:7px;border-radius:50%;background:var(--amber);animation:pulse 2.2s ease infinite}
+  .badge.real{border-color:rgba(217,138,118,.5); color:var(--red); background:var(--red-wash)}
+  .badge .mono{font-family:var(--mono); letter-spacing:0; text-transform:none; font-size:12px; color:var(--ivory)}
+  @keyframes pulse{0%,100%{opacity:1; box-shadow:0 0 0 0 rgba(224,180,92,.35)}50%{opacity:.55; box-shadow:0 0 0 5px rgba(224,180,92,0)}}
+  .health{width:9px;height:9px;border-radius:50%;background:var(--faint);flex:none}
+  .health.ok{background:var(--green); box-shadow:0 0 7px rgba(143,201,160,.6)}
+  .health.bad{background:var(--red); box-shadow:0 0 7px rgba(217,138,118,.6)}
+
+  /* ---------- layout ---------- */
+  main{
+    display:grid; grid-template-columns:minmax(340px,5fr) 7fr; gap:20px;
+    max-width:1280px; margin:0 auto; padding:24px 28px 8px;
+    align-items:start;
+  }
+  .col{display:grid; gap:20px; align-items:start; min-width:0}
+
+  /* ---------- cards ---------- */
+  .card{
+    position:relative;
+    background:linear-gradient(180deg, var(--panel2), var(--panel));
+    border:1px solid var(--line); border-radius:var(--radius);
+    padding:22px 24px;
+    box-shadow:0 14px 34px -22px rgba(0,0,0,.75), inset 0 1px 0 rgba(255,255,255,.025);
+    min-width:0;
+  }
+  .card.accent::before{
+    content:''; position:absolute; top:-1px; left:22px; right:22px; height:2px; border-radius:2px;
+    background:linear-gradient(90deg, transparent, var(--gold) 25%, var(--gold) 75%, transparent);
+    opacity:.75;
+  }
+  .kicker{
+    font:600 10.5px var(--sans); letter-spacing:.2em; text-transform:uppercase; color:var(--gold);
+    display:flex; align-items:center; gap:10px;
+  }
+  .kicker .rule{flex:1; height:1px; background:var(--line-soft)}
+  .card h2{font:500 21px/1.25 var(--serif); color:var(--ivory); margin:7px 0 4px; letter-spacing:.01em}
+  .card .sub{color:var(--muted); font-size:13px; margin:0 0 16px}
+
+  /* ---------- forms ---------- */
+  label.f{display:block; font:600 10.5px var(--sans); letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin:15px 0 7px}
+  .money{position:relative}
+  .money .cur{position:absolute; left:13px; top:50%; transform:translateY(-50%); color:var(--gold); font:500 15px var(--serif)}
+  input[type=number], input[type=text]{
+    width:100%; background:var(--well); color:var(--ivory);
+    border:1px solid var(--line); border-radius:8px; padding:11px 13px;
+    font:15px var(--sans); outline:none; transition:border-color .15s, box-shadow .15s;
+  }
+  .money input{padding-left:28px}
+  input:focus{border-color:var(--gold-dim); box-shadow:0 0 0 3px rgba(201,169,110,.12)}
+  input::placeholder{color:var(--faint)}
+  .seg{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px}
+  .seg input{position:absolute; opacity:0; pointer-events:none}
+  .seg label{
+    text-align:center; padding:10px 6px; border:1px solid var(--line); border-radius:8px;
+    background:var(--well); color:var(--muted); cursor:pointer; user-select:none;
+    font:600 12.5px var(--sans); letter-spacing:.06em; transition:all .15s;
+  }
+  .seg label .d{display:block; font:italic 11px var(--serif); color:var(--faint); letter-spacing:0; font-weight:400; margin-top:2px}
+  .seg input:checked + label{border-color:var(--gold); color:var(--gold-bright); background:var(--gold-wash)}
+  .seg input:focus-visible + label{box-shadow:0 0 0 3px rgba(201,169,110,.2)}
+  .hint{font:italic 12px var(--serif); color:var(--faint); margin-top:7px}
+
+  /* ---------- buttons ---------- */
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    border-radius:8px; padding:11px 18px; cursor:pointer;
+    font:600 13px var(--sans); letter-spacing:.08em; text-transform:uppercase;
+    border:1px solid transparent; transition:all .15s; white-space:nowrap;
+  }
+  .btn:disabled{opacity:.45; cursor:default}
+  .btn.gold{
+    background:linear-gradient(180deg,#dcbc85,#b3945c); color:#14181f;
+    box-shadow:0 8px 20px -10px rgba(201,169,110,.55), inset 0 1px 0 rgba(255,255,255,.35);
+  }
+  .btn.gold:hover:not(:disabled){background:linear-gradient(180deg,#e8cd9c,#c0a069); transform:translateY(-1px)}
+  .btn.gold:active:not(:disabled){transform:translateY(0)}
+  .btn.ghost{background:transparent; border-color:var(--gold-line); color:var(--gold-bright)}
+  .btn.ghost:hover:not(:disabled){background:var(--gold-wash); border-color:var(--gold-dim)}
+  .btn.wide{width:100%; margin-top:18px; padding:13px}
+
+  /* ---------- proposal ---------- */
+  .prop-rows{display:grid; gap:0; margin:12px 0 4px; border-top:1px solid var(--line-soft)}
+  .prop-row{display:flex; justify-content:space-between; gap:14px; padding:8px 2px; border-bottom:1px solid var(--line-soft); font-size:13.5px}
+  .prop-row .k{color:var(--muted); flex:none}
+  .prop-row .v{color:var(--ivory); text-align:right; font-variant-numeric:tabular-nums}
+  .why{margin-top:16px}
+  .why-h, .policy-h{font:600 10.5px var(--sans); letter-spacing:.18em; text-transform:uppercase; color:var(--gold); margin-bottom:8px}
+  .why ul{margin:0; padding-left:18px; display:grid; gap:6px}
+  .why li{font-size:13px; color:var(--text)}
+  .why li::marker{color:var(--gold-dim)}
+  .policy{margin-top:16px; border:1px solid var(--gold-line); background:var(--gold-wash); border-radius:9px; padding:13px 15px}
+  .policy ul{margin:0; padding-left:18px; display:grid; gap:5px}
+  .policy li{font-size:12.5px; color:var(--text)}
+  .policy li b{color:var(--gold-bright); font-weight:600}
+  .policy li::marker{color:var(--gold-dim)}
+  .fine{font:italic 11.5px var(--serif); color:var(--faint); margin-top:10px; text-align:center}
+
+  /* ---------- declined / errors ---------- */
+  .declined{
+    margin-top:16px; border:1px solid rgba(217,138,118,.42); background:var(--red-wash);
+    border-radius:9px; padding:13px 15px;
+  }
+  .declined .dh{font:italic 15px var(--serif); color:var(--red); margin-bottom:4px}
+  .declined .dm{font-size:13px; color:var(--text)}
+
+  /* ---------- live panel ---------- */
+  .live-head{display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap}
+  .tick-controls{display:flex; align-items:center; gap:14px; flex-wrap:wrap}
+  .switch{display:inline-flex; align-items:center; gap:9px; cursor:pointer; user-select:none}
+  .switch input{position:absolute; opacity:0; pointer-events:none}
+  .switch .track{
+    width:36px; height:19px; border-radius:999px; background:var(--well);
+    border:1px solid var(--line); position:relative; transition:all .18s; flex:none;
+  }
+  .switch .track::after{
+    content:''; position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%;
+    background:var(--muted); transition:all .18s;
+  }
+  .switch input:checked + .track{background:var(--gold-wash); border-color:var(--gold)}
+  .switch input:checked + .track::after{left:19px; background:var(--gold)}
+  .switch .sw-label{font:600 10.5px var(--sans); letter-spacing:.16em; text-transform:uppercase; color:var(--muted)}
+  .switch input:checked ~ .sw-label{color:var(--gold-bright)}
+
+  .totals{
+    display:flex; gap:22px; flex-wrap:wrap; margin:14px 0 4px; padding:12px 15px;
+    background:var(--well); border:1px solid var(--line-soft); border-radius:9px;
+  }
+  .tot .tk{font:600 10px var(--sans); letter-spacing:.16em; text-transform:uppercase; color:var(--faint)}
+  .tot .tv{font:500 17px var(--serif); color:var(--ivory); font-variant-numeric:tabular-nums}
+
+  .tblwrap{overflow-x:auto; margin-top:8px}
+  table{width:100%; border-collapse:collapse; font-size:13px}
+  th{
+    font:600 10px var(--sans); letter-spacing:.16em; text-transform:uppercase; color:var(--faint);
+    text-align:left; padding:8px 10px 7px; border-bottom:1px solid var(--line); white-space:nowrap;
+  }
+  td{padding:9px 10px; border-bottom:1px solid var(--line-soft); color:var(--text); white-space:nowrap; vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .num{text-align:right; font-variant-numeric:tabular-nums}
+  th.num{text-align:right}
+  .mono{font-family:var(--mono); font-size:12.5px}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+  .pair{color:var(--ivory); font-weight:600}
+  .range{color:var(--muted); font-size:12px}
+  .subhead{
+    font:600 10.5px var(--sans); letter-spacing:.2em; text-transform:uppercase; color:var(--gold);
+    margin:22px 0 2px; display:flex; align-items:center; gap:10px;
+  }
+  .subhead .rule{flex:1; height:1px; background:var(--line-soft)}
+  .chip{
+    display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:3px 10px 3px 8px;
+    font:600 10.5px var(--sans); letter-spacing:.1em; text-transform:uppercase; border:1px solid var(--line);
+  }
+  .chip::before{content:''; width:6px; height:6px; border-radius:50%; background:currentColor}
+  .chip.running{color:var(--green); border-color:rgba(143,201,160,.35); background:var(--green-wash)}
+  .chip.paused{color:var(--amber); border-color:rgba(224,180,92,.4); background:var(--amber-wash)}
+  .chip.stopped{color:var(--faint); background:rgba(95,103,121,.1)}
+  .regime{font:600 11px var(--sans); letter-spacing:.06em}
+  .regime.range{color:var(--muted)} .regime.up{color:var(--green)} .regime.down{color:var(--red)}
+  .empty{font:italic 14px var(--serif); color:var(--faint); padding:16px 4px}
+
+  /* ---------- action log timeline ---------- */
+  .timeline{position:relative; margin-top:14px; max-height:560px; overflow-y:auto; padding-right:6px}
+  .timeline::before{content:''; position:absolute; left:17px; top:10px; bottom:10px; width:1px; background:var(--line)}
+  .ev{position:relative; display:flex; gap:14px; padding:7px 0}
+  .ev-dot{
+    position:relative; z-index:1; flex:none; width:35px; height:35px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; margin-top:2px;
+    background:var(--panel); border:1px solid var(--line); color:var(--faint); font-size:11px;
+  }
+  .ev-body{min-width:0; flex:1; padding:2px 0 8px}
+  .ev-head{display:flex; align-items:baseline; gap:9px; flex-wrap:wrap}
+  .ev-label{font:600 11px var(--sans); letter-spacing:.14em; text-transform:uppercase; color:var(--muted)}
+  .ev-bot{font-family:var(--mono); font-size:12px; color:var(--ivory)}
+  .ev-tick{font-family:var(--mono); font-size:11px; color:var(--faint); margin-left:auto}
+  .ev-reason{font-size:12.5px; color:var(--muted); margin-top:3px; line-height:1.5}
+  /* the signature moments */
+  .ev.pause .ev-dot, .ev.resume .ev-dot{width:35px; height:35px; font-size:10px; font-weight:700}
+  .ev.pause .ev-dot{background:var(--amber-wash); border-color:var(--amber); color:var(--amber); box-shadow:0 0 14px -2px rgba(224,180,92,.45)}
+  .ev.resume .ev-dot{background:var(--green-wash); border-color:var(--green); color:var(--green); box-shadow:0 0 14px -2px rgba(143,201,160,.45)}
+  .ev.pause .ev-body, .ev.resume .ev-body{
+    border:1px solid; border-radius:9px; padding:10px 13px 11px; margin-bottom:2px;
+  }
+  .ev.pause .ev-body{border-color:rgba(224,180,92,.38); background:var(--amber-wash)}
+  .ev.resume .ev-body{border-color:rgba(143,201,160,.35); background:var(--green-wash)}
+  .ev.pause .ev-label{color:var(--amber)} .ev.resume .ev-label{color:var(--green)}
+  .ev.pause .ev-reason, .ev.resume .ev-reason{color:var(--text)}
+  .ev.launch .ev-dot{border-color:var(--gold-line); color:var(--gold)}
+  .ev.launch .ev-label{color:var(--gold-bright)}
+  .ev.stop .ev-dot{border-color:rgba(217,138,118,.4); color:var(--red)}
+
+  /* ---------- digest ---------- */
+  .md{margin-top:16px; border-top:1px solid var(--line-soft); padding-top:6px; overflow-x:auto}
+  .md h1{font:500 19px var(--serif); color:var(--ivory); margin:14px 0 6px}
+  .md h2{font:500 16px var(--serif); color:var(--gold-bright); margin:18px 0 6px}
+  .md h3{font:500 14px var(--serif); color:var(--ivory); margin:14px 0 4px}
+  .md p{margin:7px 0; font-size:13px; color:var(--text)}
+  .md em{font-family:var(--serif); color:var(--muted)}
+  .md strong{color:var(--ivory)}
+  .md code{font-family:var(--mono); font-size:12px; background:var(--well); border:1px solid var(--line-soft); border-radius:4px; padding:1px 5px; color:var(--gold-bright)}
+  .md table{margin:8px 0; font-size:12.5px}
+  .md blockquote{margin:8px 0; padding:6px 14px; border-left:2px solid var(--gold-line); color:var(--muted); font-style:italic}
+  .md ul{margin:6px 0; padding-left:20px}
+  .md li{font-size:13px; margin:4px 0}
+  .md li::marker{color:var(--gold-dim)}
+  .md hr{border:none; border-top:1px solid var(--line-soft); margin:14px 0}
+  .digest-note{font:italic 12px var(--serif); color:var(--faint); margin-top:10px}
+
+  /* ---------- toasts ---------- */
+  #toasts{position:fixed; right:18px; bottom:18px; z-index:50; display:grid; gap:10px; max-width:min(400px, calc(100vw - 36px))}
+  .toast{
+    background:linear-gradient(180deg, #1d2537, #182032);
+    border:1px solid var(--line); border-left:3px solid var(--gold);
+    border-radius:9px; padding:12px 15px; box-shadow:0 18px 40px -18px rgba(0,0,0,.85);
+    animation:rise .25s ease; font-size:12.5px; color:var(--text);
+  }
+  .toast .th{display:flex; gap:8px; align-items:baseline; font:600 11px var(--sans); letter-spacing:.14em; text-transform:uppercase; color:var(--gold-bright); margin-bottom:3px}
+  .toast.pause{border-left-color:var(--amber)} .toast.pause .th{color:var(--amber)}
+  .toast.resume{border-left-color:var(--green)} .toast.resume .th{color:var(--green)}
+  .toast.error{border-left-color:var(--red)} .toast.error .th{color:var(--red)}
+  @keyframes rise{from{opacity:0; transform:translateY(8px)}to{opacity:1; transform:none}}
+
+  footer{
+    max-width:1280px; margin:0 auto; padding:22px 28px 30px; text-align:center;
+    font:italic 12px var(--serif); color:var(--faint);
+  }
+  footer .sep{color:var(--gold-dim); margin:0 8px}
+
+  .hidden{display:none !important}
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 980px){
+    main{display:flex; flex-direction:column; padding:18px 14px 4px}
+    .col{display:contents}
+    #mandateCard{order:1} #proposalCard{order:2} #liveCard{order:3} #logCard{order:4} #digestCard{order:5}
+    header{padding:12px 14px}
+    .brand-tag{display:none}
+    .card{padding:18px 16px}
+    .totals{gap:16px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <svg viewBox="0 0 44 44" width="42" height="42" aria-hidden="true">
+      <circle cx="22" cy="6.6" r="2.5" fill="#c9a96e"/>
+      <line x1="22" y1="9.2" x2="22" y2="12.4" stroke="#c9a96e" stroke-width="2"/>
+      <path d="M9 26.5a13 13 0 0 1 26 0" fill="none" stroke="#c9a96e" stroke-width="2.4" stroke-linecap="round"/>
+      <line x1="5.6" y1="26.5" x2="38.4" y2="26.5" stroke="#c9a96e" stroke-width="2.4" stroke-linecap="round"/>
+      <path d="M22 36 L13.8 31.6 v8.8 Z" fill="#c9a96e"/>
+      <path d="M22 36 L30.2 31.6 v8.8 Z" fill="#c9a96e"/>
+      <circle cx="22" cy="36" r="2" fill="#0f131c" stroke="#c9a96e" stroke-width="1.6"/>
+    </svg>
+    <div>
+      <div class="brand-name"><b>Bot</b> Butler</div>
+      <div class="brand-tag">set, but never forget</div>
+    </div>
+  </div>
+  <div class="head-right">
+    <span class="badge sim" id="simBadge"><span class="pulse"></span><span id="simBadgeText">Simulated market · demo</span></span>
+    <span class="badge">tick&nbsp;<span class="mono" id="tickNo">–</span></span>
+    <span class="health" id="healthDot" title="service health"></span>
+  </div>
+</header>
+
+<main>
+  <!-- ================= left column ================= -->
+  <section class="col">
+
+    <div class="card accent" id="mandateCard">
+      <div class="kicker">New mandate<span class="rule"></span></div>
+      <h2>State your terms</h2>
+      <p class="sub">The butler measures the market, selects the pair, and drafts the strategy. Nothing launches without your word.</p>
+      <form id="mandateForm" autocomplete="off">
+        <label class="f" for="budget">Budget</label>
+        <div class="money"><span class="cur">$</span><input id="budget" type="number" min="50" step="10" value="500" required></div>
+
+        <label class="f">Risk appetite</label>
+        <div class="seg" role="radiogroup" aria-label="Risk appetite">
+          <span><input type="radio" name="risk" id="riskLow" value="low"><label for="riskLow">Low<span class="d">wide &amp; patient</span></label></span>
+          <span><input type="radio" name="risk" id="riskMed" value="medium" checked><label for="riskMed">Medium<span class="d">balanced</span></label></span>
+          <span><input type="radio" name="risk" id="riskHigh" value="high"><label for="riskHigh">High<span class="d">tight &amp; busy</span></label></span>
+        </div>
+
+        <label class="f" for="preference">Preference</label>
+        <input id="preference" type="text" value="majors" placeholder="majors — or “eth grid”, “dca”, “alts-ok”…">
+        <div class="hint">Majors only by default; alts require the words “alts-ok”.</div>
+
+        <button class="btn gold wide" type="submit" id="proposeBtn">Request proposal</button>
+      </form>
+      <div class="declined hidden" id="mandateError"><div class="dh">The butler must decline</div><div class="dm"></div></div>
+    </div>
+
+    <div class="card accent hidden" id="proposalCard">
+      <div class="kicker">Proposal <span id="propId" class="mono" style="letter-spacing:0"></span><span class="rule"></span></div>
+      <h2 id="propTitle">—</h2>
+      <div class="prop-rows" id="propRows"></div>
+      <div class="why">
+        <div class="why-h">The butler's reasoning</div>
+        <ul id="propWhy"></ul>
+      </div>
+      <div class="policy">
+        <div class="policy-h">Stewardship you authorize at launch</div>
+        <ul>
+          <li><b>Auto-pause</b> when price breaks out of the grid range or the regime turns strongly trending.</li>
+          <li><b>Auto-resume</b> once the market settles back into a calm range inside the grid.</li>
+          <li>Range <b>resizes are only ever proposed</b> — they always await your explicit confirmation.</li>
+          <li>Every action is <b>logged with its reason</b> and reported in the daily digest. No silent changes.</li>
+        </ul>
+      </div>
+      <button class="btn gold wide" id="launchBtn">Confirm &amp; launch</button>
+      <div class="fine" id="capsFine">Hard caps re-checked at launch.</div>
+      <div class="declined hidden" id="launchError"><div class="dh">The butler must decline</div><div class="dm"></div></div>
+    </div>
+
+    <div class="card" id="digestCard">
+      <div class="kicker">Daily digest<span class="rule"></span></div>
+      <h2>“Here's what your bot did”</h2>
+      <p class="sub">Market snapshot, P&amp;L, every intervention with its reason, and the butler's commentary.</p>
+      <button class="btn ghost" id="digestBtn">Prepare today's digest</button>
+      <div class="md hidden" id="digestBody"></div>
+      <div class="digest-note hidden" id="digestNote"></div>
+    </div>
+
+  </section>
+
+  <!-- ================= right column ================= -->
+  <section class="col">
+
+    <div class="card" id="liveCard">
+      <div class="live-head">
+        <div>
+          <div class="kicker">Live panel</div>
+          <h2>Under management</h2>
+        </div>
+        <div class="tick-controls">
+          <button class="btn ghost" id="tickBtn">Advance tick</button>
+          <label class="switch" title="Advance the steward loop automatically (client-side interval)">
+            <input type="checkbox" id="autoTick">
+            <span class="track"></span>
+            <span class="sw-label">Auto-tick</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="totals" id="totals">
+        <div class="tot"><div class="tk">Portfolio P&amp;L</div><div class="tv" id="totPnl">—</div></div>
+        <div class="tot"><div class="tk">Deployed</div><div class="tv" id="totInvested">—</div></div>
+        <div class="tot"><div class="tk">Fills</div><div class="tv" id="totFills">—</div></div>
+        <div class="tot"><div class="tk">Active bots</div><div class="tv" id="totBots">—</div></div>
+      </div>
+
+      <div class="tblwrap" id="botsWrap"></div>
+
+      <div class="subhead">Market snapshot<span class="rule"></span></div>
+      <div class="tblwrap" id="marketWrap"></div>
+    </div>
+
+    <div class="card" id="logCard">
+      <div class="kicker">Action log<span class="rule"></span></div>
+      <h2>Every intervention, with its reason</h2>
+      <p class="sub">The append-only audit trail. Pauses and resumes are the butler's signature moves — watch for them during a breakout.</p>
+      <div class="timeline" id="timeline"></div>
+    </div>
+
+  </section>
+</main>
+
+<footer>
+  Bot Butler <span class="sep">·</span> a strategist that manages, not just creates
+  <span class="sep">·</span> zero-dependency Node
+  <span class="sep">·</span> state shared with the CLI (<span class="mono" style="font-style:normal">state/butler-state.json</span>)
+</footer>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+
+// ---------------------------------------------------------------- formatting
+function fmtUsd(n, digits = 2) {
+  if (!Number.isFinite(n)) return '—';
+  const sign = n < 0 ? '-' : '';
+  return sign + '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+function fmtSignedUsd(n, digits = 2) {
+  if (!Number.isFinite(n)) return '—';
+  return (n >= 0 ? '+' : '') + fmtUsd(n, digits);
+}
+function fmtPx(px) {
+  if (!Number.isFinite(px)) return '—';
+  const d = px >= 10000 ? 0 : px >= 1000 ? 1 : px >= 10 ? 2 : px >= 0.1 ? 4 : 6;
+  return px.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: d });
+}
+function fmtNum(n, d = 2) { return Number.isFinite(n) ? Number(n).toFixed(d) : '—'; }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+// ---------------------------------------------------------------- api client
+async function api(path, opts = {}) {
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  let data = null;
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  if (!res.ok) {
+    const err = new Error((data && data.error) || res.statusText || 'Request failed');
+    err.status = res.status;
+    err.rail = Boolean(data && data.rail);
+    throw err;
+  }
+  return data;
+}
+
+// ---------------------------------------------------------------- toasts
+function toast(kind, title, message, ms = 6500) {
+  const box = document.createElement('div');
+  box.className = 'toast ' + kind;
+  const icon = kind === 'pause' ? '❚❚' : kind === 'resume' ? '▶' : kind === 'error' ? '✕' : '◆';
+  box.innerHTML = '<div class="th"><span>' + icon + '</span><span>' + esc(title) + '</span></div>' +
+    (message ? '<div>' + esc(message) + '</div>' : '');
+  $('toasts').appendChild(box);
+  setTimeout(() => box.remove(), ms);
+}
+function truncate(s, n = 160) { s = String(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+// ---------------------------------------------------------------- action log
+const EV_META = {
+  auto_pause:        { label: 'Paused — auto',       cls: 'pause',  icon: '❚❚' },
+  auto_resume:       { label: 'Resumed — auto',      cls: 'resume', icon: '▶' },
+  launch:            { label: 'Launched',            cls: 'launch', icon: '◆' },
+  propose:           { label: 'Proposed',            cls: 'note',   icon: '✎' },
+  resize_proposed:   { label: 'Resize proposed',     cls: 'note',   icon: '…' },
+  recenter_proposed: { label: 'Re-center proposed',  cls: 'note',   icon: '…' },
+  resize_applied:    { label: 'Resize applied',      cls: 'launch', icon: '⇄' },
+  manual_pause:      { label: 'Paused — manual',     cls: 'pause',  icon: '❚❚' },
+  manual_resume:     { label: 'Resumed — manual',    cls: 'resume', icon: '▶' },
+  manual_stop:       { label: 'Stopped — manual',    cls: 'stop',   icon: '■' },
+};
+
+function renderTimeline(actions) {
+  const host = $('timeline');
+  if (!actions || !actions.length) {
+    host.innerHTML = '<div class="empty">No actions yet. Launch a bot, then advance a few ticks — the butler will show its work here.</div>';
+    return;
+  }
+  const rows = actions.slice().reverse().map((a) => {
+    const meta = EV_META[a.type] || { label: a.type, cls: 'note', icon: '·' };
+    return '<div class="ev ' + meta.cls + '">' +
+      '<div class="ev-dot">' + meta.icon + '</div>' +
+      '<div class="ev-body">' +
+        '<div class="ev-head">' +
+          '<span class="ev-label">' + esc(meta.label) + '</span>' +
+          (a.botId ? '<span class="ev-bot">' + esc(a.botId) + (a.instId ? ' · ' + esc(a.instId) : '') + '</span>' : (a.instId ? '<span class="ev-bot">' + esc(a.instId) + '</span>' : '')) +
+          '<span class="ev-tick">t=' + (a.tick ?? '–') + '</span>' +
+        '</div>' +
+        '<div class="ev-reason">' + esc(a.reason || '') + '</div>' +
+      '</div>' +
+    '</div>';
+  });
+  host.innerHTML = rows.join('');
+}
+
+// ---------------------------------------------------------------- live panel
+function chip(status) { return '<span class="chip ' + esc(status) + '">' + esc(status) + '</span>'; }
+function regimeCell(r) {
+  const cls = r === 'trend-up' ? 'up' : r === 'trend-down' ? 'down' : 'range';
+  const glyph = r === 'trend-up' ? '↗' : r === 'trend-down' ? '↘' : '↔';
+  return '<span class="regime ' + cls + '">' + glyph + ' ' + esc(r) + '</span>';
+}
+
+function renderBots(bots) {
+  const host = $('botsWrap');
+  if (!bots.length) {
+    host.innerHTML = '<div class="empty">No bots under management. Submit a mandate on the left — the butler is at your service.</div>';
+    return;
+  }
+  const rows = bots.map((b) => {
+    const range = b.type === 'grid' && b.params
+      ? '<span class="range">[' + fmtPx(b.params.lower) + ' … ' + fmtPx(b.params.upper) + ']</span>' : '<span class="range">—</span>';
+    const pnlCls = b.totalPnl >= 0 ? 'pos' : 'neg';
+    const detail = 'realized ' + fmtSignedUsd(b.realizedPnl) + ' · unrealized ' + fmtSignedUsd(b.unrealizedPnl) + ' · fees ' + fmtUsd(b.fees);
+    return '<tr>' +
+      '<td class="mono">' + esc(b.botId) + '</td>' +
+      '<td class="pair">' + esc(b.instId) + '</td>' +
+      '<td>' + esc(String(b.type).toUpperCase()) + '</td>' +
+      '<td>' + chip(b.status) + '</td>' +
+      '<td class="num">' + fmtUsd(b.investment, 0) + '</td>' +
+      '<td class="num">' + b.fills + '</td>' +
+      '<td class="num ' + pnlCls + '" title="' + esc(detail) + '">' + fmtSignedUsd(b.totalPnl) + '</td>' +
+      '<td>' + range + '</td>' +
+    '</tr>';
+  }).join('');
+  host.innerHTML = '<table><thead><tr><th>Bot</th><th>Pair</th><th>Type</th><th>Status</th>' +
+    '<th class="num">Invested</th><th class="num">Fills</th><th class="num">P&amp;L</th><th>Range</th></tr></thead>' +
+    '<tbody>' + rows + '</tbody></table>';
+}
+
+function renderMarket(market) {
+  const rows = market.map((m) =>
+    '<tr>' +
+      '<td class="pair">' + esc(m.instId) + '</td>' +
+      '<td class="num">' + fmtPx(m.price) + '</td>' +
+      '<td class="num">' + fmtNum(m.atrPct) + '%</td>' +
+      '<td class="num">' + fmtNum(m.trendScore) + '</td>' +
+      '<td>' + regimeCell(m.regime) + '</td>' +
+    '</tr>').join('');
+  $('marketWrap').innerHTML = '<table><thead><tr><th>Pair</th><th class="num">Price</th>' +
+    '<th class="num">ATR/candle</th><th class="num">Trend score</th><th>Regime</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+// ---------------------------------------------------------------- status
+let lastActionCount = null;
+
+async function refreshStatus() {
+  const s = await api('/api/status');
+  $('tickNo').textContent = s.tick ?? '–';
+  const badge = $('simBadge');
+  if (s.simulated) {
+    badge.classList.remove('real'); badge.classList.add('sim');
+    $('simBadgeText').textContent = 'Simulated market · demo';
+  } else {
+    badge.classList.remove('sim'); badge.classList.add('real');
+    $('simBadgeText').textContent = 'Real mode';
+  }
+  const pnl = $('totPnl');
+  pnl.textContent = fmtSignedUsd(s.totals.totalPnl);
+  pnl.className = 'tv ' + (s.totals.totalPnl >= 0 ? 'pos' : 'neg');
+  $('totInvested').textContent = fmtUsd(s.totals.invested, 0);
+  $('totFills').textContent = s.totals.fills;
+  $('totBots').textContent = s.totals.activeBots + ' / ' + s.caps.maxActiveBots;
+  $('capsFine').textContent = 'Hard caps re-checked at launch: ' + fmtUsd(s.caps.maxAllocationPerBot, 0) + '/bot · ' +
+    fmtUsd(s.caps.maxTotalAllocation, 0) + ' total · ' + s.caps.maxActiveBots + ' active bots · majors unless opted in.';
+  renderBots(s.bots);
+  renderMarket(s.market);
+  renderTimeline(s.actions);
+  lastActionCount = s.actionCount;
+  return s;
+}
+
+// ---------------------------------------------------------------- health
+async function checkHealth() {
+  try {
+    const h = await api('/api/health');
+    $('healthDot').className = 'health ' + (h.ok ? 'ok' : 'bad');
+    $('healthDot').title = 'service healthy — mode: ' + h.mode;
+  } catch {
+    $('healthDot').className = 'health bad';
+    $('healthDot').title = 'service unreachable';
+  }
+}
+
+// ---------------------------------------------------------------- mandate flow
+let currentProposal = null;
+
+function showDecline(hostId, message) {
+  const host = $(hostId);
+  host.querySelector('.dm').textContent = message;
+  host.classList.remove('hidden');
+}
+function hideDecline(hostId) { $(hostId).classList.add('hidden'); }
+
+function renderProposal(p) {
+  currentProposal = p;
+  $('propId').textContent = p.id;
+  $('propTitle').textContent = p.botType.toUpperCase() + ' bot on ' + p.instId;
+
+  const rows = [
+    ['You said', fmtUsd(p.input.budget, 0) + ' · ' + p.input.risk + ' risk · ' + p.input.preference],
+    ['Deploys', fmtUsd(p.investment, 0) + ' of ' + fmtUsd(p.input.budget, 0)],
+  ];
+  if (p.botType === 'grid') {
+    rows.push(['Grid', p.params.gridCount + ' levels · step ' + fmtNum(p.params.spacingPct) + '%']);
+    rows.push(['Range', '[' + fmtPx(p.params.lower) + ' … ' + fmtPx(p.params.upper) + ']']);
+    rows.push(['Per slot', fmtUsd(p.params.perGridQuote)]);
+  } else {
+    rows.push(['DCA base', fmtUsd(p.params.baseOrderQuote)]);
+    rows.push(['Safety orders', p.params.safetyOrders + ' · every ' + fmtNum(p.params.priceDeviationPct) + '% · vol ×' + p.params.volumeScale]);
+    rows.push(['Take profit', fmtNum(p.params.takeProfitPct, 1) + '%']);
+  }
+  rows.push(['Market', fmtPx(p.metrics.price) + ' · ATR ' + fmtNum(p.metrics.atrPct) + '% · trend ' + fmtNum(p.metrics.trendScore) + ' (' + p.metrics.regime + ')']);
+  $('propRows').innerHTML = rows.map((r) =>
+    '<div class="prop-row"><span class="k">' + esc(r[0]) + '</span><span class="v">' + esc(r[1]) + '</span></div>').join('');
+
+  $('propWhy').innerHTML = p.reasoning.map((r) => '<li>' + esc(r) + '</li>').join('');
+  $('launchBtn').disabled = false;
+  hideDecline('launchError');
+  $('proposalCard').classList.remove('hidden');
+  $('proposalCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+$('mandateForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  hideDecline('mandateError');
+  const btn = $('proposeBtn');
+  btn.disabled = true; btn.textContent = 'Consulting…';
+  try {
+    const body = {
+      budget: Number($('budget').value),
+      risk: (document.querySelector('input[name=risk]:checked') || {}).value || 'medium',
+      preference: $('preference').value.trim() || 'majors',
+    };
+    const data = await api('/api/propose', { method: 'POST', body: JSON.stringify(body) });
+    renderProposal(data.proposal);
+  } catch (err) {
+    showDecline('mandateError', err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Request proposal';
+  }
+});
+
+$('launchBtn').addEventListener('click', async () => {
+  if (!currentProposal) return;
+  hideDecline('launchError');
+  const btn = $('launchBtn');
+  btn.disabled = true; btn.textContent = 'Launching…';
+  try {
+    const data = await api('/api/launch', { method: 'POST', body: JSON.stringify({ proposalId: currentProposal.id }) });
+    $('proposalCard').classList.add('hidden');
+    currentProposal = null;
+    toast('launch', data.bot.botId + ' launched', data.bot.type.toUpperCase() + ' on ' + data.bot.instId +
+      ' · ' + fmtUsd(data.bot.investment, 0) + ' deployed. The steward is watching.');
+    await refreshStatus();
+  } catch (err) {
+    showDecline('launchError', err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Confirm & launch';
+  }
+});
+
+// ---------------------------------------------------------------- steward loop
+let ticking = false;
+let autoTimer = null;
+let autoFailures = 0;
+
+async function tickOnce(auto = false) {
+  if (ticking) return;
+  ticking = true;
+  const btn = $('tickBtn');
+  btn.disabled = true;
+  try {
+    const data = await api('/api/tick', { method: 'POST', body: JSON.stringify({ ticks: 1 }) });
+    $('tickNo').textContent = data.tick ?? '–';
+    for (const a of data.actions || []) {
+      if (a.type === 'auto_pause') toast('pause', 'Auto-pause · ' + (a.botId || ''), truncate(a.reason), 9000);
+      else if (a.type === 'auto_resume') toast('resume', 'Auto-resume · ' + (a.botId || ''), truncate(a.reason), 9000);
+      else if (a.type.endsWith('_proposed')) toast('note', 'Awaiting you · ' + (a.botId || ''), truncate(a.reason));
+    }
+    autoFailures = 0;
+    await refreshStatus();
+  } catch (err) {
+    if (auto) {
+      autoFailures += 1;
+      if (autoFailures >= 3) {
+        $('autoTick').checked = false;
+        stopAutoTick();
+        toast('error', 'Auto-tick stopped', 'The service is unreachable: ' + err.message);
+      }
+    } else {
+      toast('error', 'Tick failed', err.message);
+    }
+  } finally {
+    ticking = false;
+    btn.disabled = false;
+  }
+}
+
+function startAutoTick() {
+  if (autoTimer) return;
+  autoTimer = setInterval(() => tickOnce(true), 2500);
+  tickOnce(true);
+}
+function stopAutoTick() {
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+}
+
+$('tickBtn').addEventListener('click', () => tickOnce(false));
+$('autoTick').addEventListener('change', (e) => (e.target.checked ? startAutoTick() : stopAutoTick()));
+
+// ---------------------------------------------------------------- digest (md -> html)
+function mdInline(s) {
+  // s is already HTML-escaped
+  return s
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[\s(])_([^_]+)_(?=[\s).,;:!?]|$)/g, '$1<em>$2</em>');
+}
+
+function mdToHtml(md) {
+  const lines = String(md).split(/\r?\n/);
+  const out = [];
+  let list = false, table = null, quote = false;
+  const closeAll = () => {
+    if (list) { out.push('</ul>'); list = false; }
+    if (quote) { out.push('</blockquote>'); quote = false; }
+    if (table) { flushTable(); }
+  };
+  const flushTable = () => {
+    if (!table) return;
+    const [head, ...body] = table;
+    out.push('<table><thead><tr>' + head.map((h) => '<th>' + mdInline(h) + '</th>').join('') + '</tr></thead><tbody>');
+    for (const row of body) out.push('<tr>' + row.map((c) => '<td>' + mdInline(c) + '</td>').join('') + '</tr>');
+    out.push('</tbody></table>');
+    table = null;
+  };
+  for (const raw of lines) {
+    const line = esc(raw);
+    const t = line.trim();
+    if (t.startsWith('|')) {
+      const cells = t.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      if (/^[\s\-:|]+$/.test(t.replace(/\|/g, ''))) continue; // separator row
+      if (!table) { closeAll(); table = []; }
+      table.push(cells);
+      continue;
+    }
+    if (table) flushTable();
+    if (!t) { closeAll(); continue; }
+    if (t.startsWith('### ')) { closeAll(); out.push('<h3>' + mdInline(t.slice(4)) + '</h3>'); continue; }
+    if (t.startsWith('## ')) { closeAll(); out.push('<h2>' + mdInline(t.slice(3)) + '</h2>'); continue; }
+    if (t.startsWith('# ')) { closeAll(); out.push('<h1>' + mdInline(t.slice(2)) + '</h1>'); continue; }
+    if (/^-{3,}$/.test(t)) { closeAll(); out.push('<hr>'); continue; }
+    if (t.startsWith('&gt; ') || t === '&gt;') {
+      if (!quote) { closeAll(); out.push('<blockquote>'); quote = true; }
+      out.push('<p>' + mdInline(t.replace(/^&gt;\s?/, '')) + '</p>');
+      continue;
+    }
+    if (t.startsWith('- ')) {
+      if (!list) { closeAll(); out.push('<ul>'); list = true; }
+      out.push('<li>' + mdInline(t.slice(2)) + '</li>');
+      continue;
+    }
+    closeAll();
+    out.push('<p>' + mdInline(t) + '</p>');
+  }
+  closeAll();
+  return out.join('\n');
+}
+
+$('digestBtn').addEventListener('click', async () => {
+  const btn = $('digestBtn');
+  btn.disabled = true; btn.textContent = 'Preparing…';
+  try {
+    const d = await api('/api/digest');
+    $('digestBody').innerHTML = mdToHtml(d.markdown);
+    $('digestBody').classList.remove('hidden');
+    $('digestNote').textContent = d.note || '';
+    $('digestNote').classList.remove('hidden');
+  } catch (err) {
+    toast('error', 'Digest failed', err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Refresh today’s digest';
+  }
+});
+
+// ---------------------------------------------------------------- boot
+(async function boot() {
+  await checkHealth();
+  try { await refreshStatus(); } catch (err) { toast('error', 'Status failed', err.message); }
+  setInterval(checkHealth, 15000);
+  setInterval(() => { if (!document.hidden && !ticking) refreshStatus().catch(() => {}); }, 8000);
+})();
+</script>
+</body>
+</html>
